@@ -1,47 +1,56 @@
 package proxy
 
 import (
-	"dofus-proxy/config"
+	connection "dofus-proxy/proto/connection/message"
+	game "dofus-proxy/proto/game/message"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
+	"reflect"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
 )
 
-type Modifier *func(proto.Message) proto.Message
-type Listener *func(proto.Message)
+type Modifier func(proto.Message) (proto.Message, error)
+type Listener func(proto.Message)
 
 type proxy struct {
 	sync.Mutex
-	modifiers map[string]Modifier
-	listeners map[string]Listener
-	injector  chan proto.Message
+	host           string
+	port           uint16
+	messageType    proto.Message
+	modifiers      map[string]Modifier
+	listeners      map[string]Listener
+	clientInjector chan proto.Message
+	serverInjector chan proto.Message
 }
 
-const DOFUS_PORT = 5555
+var proxyMap = make(map[string]*proxy)
 
-func New() *proxy {
-	return &proxy{
-		modifiers: make(map[string]Modifier),
-		listeners: make(map[string]Listener),
-		injector:  make(chan proto.Message),
+func New(host string, port uint16, messageType proto.Message) *proxy {
+	p := &proxy{
+		host:           host,
+		port:           port,
+		messageType:    messageType,
+		modifiers:      make(map[string]Modifier),
+		listeners:      make(map[string]Listener),
+		clientInjector: make(chan proto.Message),
+		serverInjector: make(chan proto.Message),
 	}
+	proxyMap[host] = p
+
+	return p
 }
 
-func (p *proxy) Listen(proxyPort uint16, configPort uint16) error {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", proxyPort))
+func (p *proxy) Listen() error {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", p.port))
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Proxy listening on %d\n", proxyPort)
-
-	originalHost, err := config.Run(proxyPort, configPort)
-	if err != nil {
-		return err
-	}
+	fmt.Printf("Proxy listening on %d\n", p.port)
 
 	for {
 		clientToServer, err := listener.Accept()
@@ -52,7 +61,7 @@ func (p *proxy) Listen(proxyPort uint16, configPort uint16) error {
 
 		fmt.Println("Client to server connected")
 
-		serverToClient, err := net.Dial("tcp", originalHost)
+		serverToClient, err := net.Dial("tcp", p.host)
 		if err != nil {
 			clientToServer.Close()
 			continue
@@ -60,8 +69,8 @@ func (p *proxy) Listen(proxyPort uint16, configPort uint16) error {
 
 		fmt.Println("Server to client connected")
 
-		go p.handle(clientToServer, serverToClient)
-		go p.handle(serverToClient, clientToServer)
+		go p.handle(clientToServer, serverToClient, p.clientInjector)
+		go p.handle(serverToClient, clientToServer, p.serverInjector)
 	}
 }
 
@@ -89,11 +98,15 @@ func (p *proxy) RemoveListener(name string) {
 	p.Unlock()
 }
 
-func (p *proxy) Inject(message proto.Message) {
-	p.injector <- message
+func (p *proxy) InjectClient(message proto.Message) {
+	p.clientInjector <- message
 }
 
-func (p *proxy) handle(from net.Conn, to net.Conn) {
+func (p *proxy) InjectServer(message proto.Message) {
+	p.serverInjector <- message
+}
+
+func (p *proxy) handle(from net.Conn, to net.Conn, injector chan proto.Message) {
 	defer from.Close()
 	defer to.Close()
 	var fragmentBuffer []byte
@@ -118,32 +131,106 @@ func (p *proxy) handle(from net.Conn, to net.Conn) {
 
 			fmt.Printf("Received %d bytes: %x\n", size, payload)
 
-			// TODO: call listeners
+			message, ok := reflect.New(reflect.TypeOf(p.messageType).Elem()).Interface().(proto.Message)
+			if !ok {
+				return
+			}
 
-			// TODO: handle modifiers
+			err := proto.Unmarshal(payload, message)
+			if err != nil {
+				return
+			}
+
+			p.Lock()
+			for _, listener := range p.listeners {
+				listener(message)
+			}
+
+			for _, modifier := range p.modifiers {
+				newMessage, err := modifier(message)
+				if err != nil {
+					continue
+				}
+				message = newMessage
+			}
+			p.Unlock()
+
+			data, err := encodeMessage(message)
+			if err != nil {
+				return
+			}
+
+			_, err = to.Write(data)
+			if err != nil {
+				return
+			}
 
 			fragmentBuffer = fragmentBuffer[uint64(sizeLength)+size:]
-		}
-
-		// TODO: send back modified message
-		_, err = to.Write(buffer)
-		if err != nil {
-			return
 		}
 
 		done := false
 		for !done {
 			select {
-			case message, ok := <-p.injector:
+			case message, ok := <-injector:
 				if !ok {
-					done = true
-					break
+					return
 				}
 
-				// TODO: encode and send message
+				data, err := encodeMessage(message)
+				if err != nil {
+					return
+				}
+
+				_, err = to.Write(data)
+				if err != nil {
+					return
+				}
 			default:
 				done = true
 			}
 		}
+	}
+}
+
+func encodeMessage(message proto.Message) ([]byte, error) {
+	data, err := proto.Marshal(message)
+	if err != nil {
+		return []byte{}, err
+	}
+
+	varIntBuffer := make([]byte, binary.MaxVarintLen64)
+	newSizeLength := binary.PutUvarint(varIntBuffer, uint64(len(data)))
+	return append(varIntBuffer[:newSizeLength], data...), nil
+}
+
+func MakeConnectionModifier(port uint16) Modifier {
+	return func(messsage proto.Message) (proto.Message, error) {
+		connectionMessage, ok := messsage.(*connection.Message)
+		if !ok {
+			return nil, errors.New("Not a connection message")
+		}
+
+		switch connectionMessage.Content.(type) {
+		case *connection.Message_Response:
+			response := connectionMessage.GetResponse()
+			switch response.Content.(type) {
+			case *connection.Response_SelectServer:
+				selectServer := response.GetSelectServer()
+				switch selectServer.Result.(type) {
+				case *connection.SelectServerResponse_Success_:
+					success := selectServer.GetSuccess()
+					proxy, found := proxyMap[success.GetHost()]
+					if !found {
+						proxy = New(fmt.Sprintf("%s:%d", success.GetHost(), success.GetPorts()[0]), port, &game.Message{})
+						proxy.Listen()
+					}
+
+					success.Host = "localhost"
+					success.Ports[0] = int32(port)
+				}
+			}
+		}
+
+		return connectionMessage, nil
 	}
 }
