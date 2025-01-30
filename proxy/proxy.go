@@ -62,8 +62,13 @@ func (p *proxy) Listen(proxyPort uint16, configPort uint16) error {
 
 		fmt.Println("Server to client connected")
 
-		go p.handle(clientToServer, serverToClient)
-		go p.handle(serverToClient, clientToServer)
+		wg := sync.WaitGroup{}
+		wg.Add(2)
+
+		go p.handle(&wg, clientToServer, serverToClient)
+		go p.handle(&wg, serverToClient, clientToServer)
+
+		wg.Wait()
 	}
 }
 
@@ -95,9 +100,8 @@ func (p *proxy) Inject(message proto.Message) {
 	p.injector <- message
 }
 
-func (p *proxy) handle(from net.Conn, to net.Conn) {
-	defer from.Close()
-	defer to.Close()
+func (p *proxy) handle(wg *sync.WaitGroup, from net.Conn, to net.Conn) {
+	defer wg.Done()
 	var fragmentBuffer []byte
 
 	for {
