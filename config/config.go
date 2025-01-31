@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
+	"strings"
 )
 
 type Config struct {
@@ -27,6 +29,38 @@ type Config struct {
 }
 
 const CONFIG_URL = "https://dofus2.cdn.ankama.com/config/release_windows.json"
+const ZAAP_FILE = "C:/Users/%s/AppData/Local/Ankama/Dofus-dofus3/zaap.yml"
+
+func editZaap(from string, to string) error {
+	username := os.Getenv("USERNAME")
+	file := fmt.Sprintf(ZAAP_FILE, username)
+	content, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+
+	newContent := strings.Replace(string(content), from, to, 1)
+
+	fileInfo, err := os.Stat(file)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(file, []byte(newContent), fileInfo.Mode())
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func RedirectZaap(configPort uint16) error {
+	return editZaap(CONFIG_URL, fmt.Sprintf("http://localhost:%d", configPort))
+}
+
+func UndoRedirectZaap(configPort uint16) error {
+	return editZaap(fmt.Sprintf("http://localhost:%d", configPort), CONFIG_URL)
+}
 
 func Run(proxyPort uint16, configPort uint16) (string, error) {
 	response, err := http.Get(CONFIG_URL)

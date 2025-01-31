@@ -14,6 +14,12 @@ const (
 )
 
 func main() {
+	// err := config.RedirectZaap(CONFIG_PORT)
+	// if err != nil {
+	// 	return
+	// }
+	// defer config.UndoRedirectZaap(CONFIG_PORT)
+
 	originalHost, err := config.Run(CONNECTION_PROXY_PORT, CONFIG_PORT)
 	if err != nil {
 		return
