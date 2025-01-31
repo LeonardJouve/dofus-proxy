@@ -49,6 +49,7 @@ func Run(proxyPort uint16, configPort uint16) (string, error) {
 		return "", errors.New("no connection hosts field")
 	}
 	originalHost := config.ConnectionHosts[0]
+	// TODO: parse original host
 	config.ConnectionHosts = []string{fmt.Sprintf("http://localhost:%d", proxyPort)}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

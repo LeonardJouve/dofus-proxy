@@ -2,7 +2,6 @@ package proxy
 
 import (
 	connection "dofus-proxy/proto/connection/message"
-	game "dofus-proxy/proto/game/message"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -18,8 +17,6 @@ type Listener func(proto.Message)
 
 type proxy struct {
 	sync.Mutex
-	host           string
-	port           uint16
 	messageType    proto.Message
 	modifiers      map[string]Modifier
 	listeners      map[string]Listener
@@ -27,30 +24,27 @@ type proxy struct {
 	serverInjector chan proto.Message
 }
 
-var proxyMap = make(map[string]*proxy)
+const CONNECTION_MODIFIER = "connection_modifier"
 
-func New(host string, port uint16, messageType proto.Message) *proxy {
+func New(messageType proto.Message) *proxy {
 	p := &proxy{
-		host:           host,
-		port:           port,
 		messageType:    messageType,
 		modifiers:      make(map[string]Modifier),
 		listeners:      make(map[string]Listener),
 		clientInjector: make(chan proto.Message),
 		serverInjector: make(chan proto.Message),
 	}
-	proxyMap[host] = p
 
 	return p
 }
 
-func (p *proxy) Listen() error {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", p.port))
+func (p *proxy) Listen(host string, port uint16) error {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Proxy listening on %d\n", p.port)
+	fmt.Printf("Proxy listening on %d\n", port)
 
 	for {
 		clientToServer, err := listener.Accept()
@@ -61,7 +55,7 @@ func (p *proxy) Listen() error {
 
 		fmt.Println("Client to server connected")
 
-		serverToClient, err := net.Dial("tcp", p.host)
+		serverToClient, err := net.Dial("tcp", host)
 		if err != nil {
 			clientToServer.Close()
 			continue
@@ -203,11 +197,11 @@ func encodeMessage(message proto.Message) ([]byte, error) {
 	return append(varIntBuffer[:newSizeLength], data...), nil
 }
 
-func MakeConnectionModifier(port uint16) Modifier {
-	return func(messsage proto.Message) (proto.Message, error) {
+func (p *proxy) AddConnectionModifier(gameProxy *proxy, port uint16) {
+	p.AddModifier(CONNECTION_MODIFIER, func(messsage proto.Message) (proto.Message, error) {
 		connectionMessage, ok := messsage.(*connection.Message)
 		if !ok {
-			return nil, errors.New("Not a connection message")
+			return nil, errors.New("not a connection message")
 		}
 
 		switch connectionMessage.Content.(type) {
@@ -219,11 +213,7 @@ func MakeConnectionModifier(port uint16) Modifier {
 				switch selectServer.Result.(type) {
 				case *connection.SelectServerResponse_Success_:
 					success := selectServer.GetSuccess()
-					proxy, found := proxyMap[success.GetHost()]
-					if !found {
-						proxy = New(fmt.Sprintf("%s:%d", success.GetHost(), success.GetPorts()[0]), port, &game.Message{})
-						proxy.Listen()
-					}
+					p.Listen(fmt.Sprintf("%s:%d", success.GetHost(), success.GetPorts()[0]), port)
 
 					success.Host = "localhost"
 					success.Ports[0] = int32(port)
@@ -232,5 +222,5 @@ func MakeConnectionModifier(port uint16) Modifier {
 		}
 
 		return connectionMessage, nil
-	}
+	})
 }
