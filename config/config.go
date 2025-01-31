@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 )
 
 type Config struct {
@@ -48,9 +49,10 @@ func Run(proxyPort uint16, configPort uint16) (string, error) {
 	if len(config.ConnectionHosts) == 0 {
 		return "", errors.New("no connection hosts field")
 	}
-	originalHost := config.ConnectionHosts[0]
-	// TODO: parse original host
-	config.ConnectionHosts = []string{fmt.Sprintf("http://localhost:%d", proxyPort)}
+	connectionHost := config.ConnectionHosts[0]
+	re := regexp.MustCompile(`([a-zA-Z0-9.-]+:\d+)`)
+	originalHost := re.FindString(connectionHost)
+	config.ConnectionHosts[0] = re.ReplaceAllString((config.ConnectionHosts[0]), fmt.Sprintf("localhost:%d", proxyPort))
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -58,7 +60,7 @@ func Run(proxyPort uint16, configPort uint16) (string, error) {
 		json.NewEncoder(w).Encode(config)
 	})
 
-	http.ListenAndServe(fmt.Sprintf(":%d", configPort), nil)
+	go http.ListenAndServe(fmt.Sprintf(":%d", configPort), nil)
 
 	fmt.Printf("Config listening on %d\n", configPort)
 
