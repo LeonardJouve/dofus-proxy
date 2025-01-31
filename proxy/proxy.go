@@ -1,7 +1,7 @@
 package proxy
 
 import (
-	connection "dofus-proxy/proto/connection/message"
+	connection "dofus-proxy/proto/connection/connection"
 	"encoding/binary"
 	"errors"
 	"fmt"

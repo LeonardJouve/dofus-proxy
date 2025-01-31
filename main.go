@@ -2,14 +2,14 @@ package main
 
 import (
 	"dofus-proxy/config"
-	connection "dofus-proxy/proto/connection/message"
+	connection "dofus-proxy/proto/connection/connection"
 	game "dofus-proxy/proto/game/message"
 	"dofus-proxy/proxy"
 )
 
 const (
-	CONNECTION_PROXY_PORT = 10_000
-	GAME_PROXY_PORT       = 10_001
+	CONNECTION_PROXY_PORT = 5555
+	GAME_PROXY_PORT       = 5556
 	CONFIG_PORT           = 1234
 )
 

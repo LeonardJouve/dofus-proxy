@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option go_package = "dofus-proxy/proto/connection/message";
+option go_package = "dofus-proxy/proto/connection/connection";
 
 package com.ankama.dofus.server.connection.protocol;
 
