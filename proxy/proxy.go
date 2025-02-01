@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	connection "dofus-proxy/proto/connection/connection"
 	"encoding/binary"
 	"errors"
@@ -143,24 +144,40 @@ func (p *proxy) handle(from net.Conn, to net.Conn, injector chan proto.Message) 
 			for _, listener := range p.listeners {
 				listener(message)
 			}
-
-			for _, modifier := range p.modifiers {
-				newMessage, err := modifier(message)
-				if err != nil {
-					continue
-				}
-				message = newMessage
-			}
 			p.Unlock()
 
-			data, err := encodeMessage(message)
+			verificationBuffer, err := proto.Marshal(message)
 			if err != nil {
 				return
 			}
 
-			_, err = to.Write(data)
-			if err != nil {
-				return
+			if bytes.Equal(verificationBuffer, payload) {
+				p.Lock()
+				for _, modifier := range p.modifiers {
+					newMessage, err := modifier(message)
+					if err != nil {
+						continue
+					}
+					message = newMessage
+				}
+				p.Unlock()
+
+				data, err := encodeMessage(message)
+				if err != nil {
+					return
+				}
+
+				_, err = to.Write(data)
+				if err != nil {
+					return
+				}
+			} else {
+				fmt.Printf("Message reencoded different from initial: skipping modifiers (probably outdated proto files)\n")
+
+				_, err = to.Write(fragmentBuffer[:uint64(sizeLength)+size])
+				if err != nil {
+					return
+				}
 			}
 
 			fragmentBuffer = fragmentBuffer[uint64(sizeLength)+size:]
@@ -222,10 +239,10 @@ func (p *proxy) AddConnectionModifier(gameProxy *proxy, port uint16) string {
 						return nil, errors.New("no port specified")
 					}
 
-					p.Listen(fmt.Sprintf("%s:%d", success.GetHost(), success.GetPorts()[0]), port)
+					go p.Listen(fmt.Sprintf("%s:%d", success.GetHost(), success.GetPorts()[0]), port)
 
 					success.Host = "localhost"
-					success.Ports[0] = int32(port)
+					success.Ports = []int32{int32(port)}
 				}
 			}
 		}
@@ -238,7 +255,7 @@ func (p *proxy) AddConnectionModifier(gameProxy *proxy, port uint16) string {
 
 func (p *proxy) AddLogListener() string {
 	p.AddListener(LOG_LISTENER, func(message proto.Message) {
-		json, err := protojson.MarshalOptions{Indent: "    "}.Marshal(message)
+		json, err := protojson.MarshalOptions{Indent: "  "}.Marshal(message)
 		if err != nil {
 			return
 		}
