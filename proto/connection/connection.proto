@@ -20,9 +20,8 @@ message Request {
 		.com.ankama.dofus.server.connection.protocol.SelectServerRequest selectServer = 4;
 		.com.ankama.dofus.server.connection.protocol.ForceAccountRequest forceAccount = 5;
 		.com.ankama.dofus.server.connection.protocol.ReleaseAccountRequest releaseAccount = 6;
-		.com.ankama.dofus.server.connection.protocol.CharactersRequest characters_request = 7;
-		.com.ankama.dofus.server.connection.protocol.FriendListRequest friend_list_request = 8;
-		.com.ankama.dofus.server.connection.protocol.AcquaintanceServersRequest acquaintance_servers_request = 9;
+		.com.ankama.dofus.server.connection.protocol.FriendListRequest friend_list_request = 7;
+		.com.ankama.dofus.server.connection.protocol.AcquaintanceServersRequest acquaintance_servers_request = 8;
 	}
 }
 
@@ -33,9 +32,8 @@ message Response {
 		.com.ankama.dofus.server.connection.protocol.IdentificationResponse identification = 3;
 		.com.ankama.dofus.server.connection.protocol.SelectServerResponse selectServer = 4;
 		.com.ankama.dofus.server.connection.protocol.ForceAccountResponse forceAccount = 5;
-		.com.ankama.dofus.server.connection.protocol.CharacterListResponse character_list_response = 6;
-		.com.ankama.dofus.server.connection.protocol.FriendListResponse friend_list = 7;
-		.com.ankama.dofus.server.connection.protocol.AcquaintanceServersResponse acquaintance_servers_response = 8;
+		.com.ankama.dofus.server.connection.protocol.FriendListResponse friend_list = 6;
+		.com.ankama.dofus.server.connection.protocol.AcquaintanceServersResponse acquaintance_servers_response = 7;
 	}
 }
 
@@ -159,10 +157,12 @@ message ServerList {
 message ServerInformation {
 	.com.ankama.dofus.server.connection.protocol.Server server = 1;
 	.com.ankama.dofus.server.connection.protocol.ServerInformation.Accessibility accessibility = 2;
+	repeated .com.ankama.dofus.server.connection.protocol.CharacterInformation characters = 3;
 	enum Accessibility {
 		ACCESSIBLE = 0;
 		SUBSCRIBE_RESTRICTION = 1;
 		MONO_ACCOUNT_RESTRICTION = 2;
+		UNKNOWN = 3;
 	}
 
 }
@@ -170,13 +170,10 @@ message ServerInformation {
 message Server {
 	int32 id = 1;
 	.com.ankama.dofus.server.connection.protocol.Server.Status status = 2;
-	bool limited = 3;
-	int32 type = 4;
-	bool mono_account = 5;
+	bool mono_account = 3;
 	enum Status {
-		OFFLINE = 0;
-		ONLINE = 1;
-		MAINTENANCE = 2;
+		ONLINE = 0;
+		MAINTENANCE = 1;
 	}
 
 }
@@ -206,45 +203,37 @@ message ForceAccountError {
 message ReleaseAccountRequest {
 }
 
-message CharactersRequest {
-}
+message CharacterInformation {
+	string name = 1;
+	.com.ankama.dofus.server.connection.protocol.CharacterInformation.Breed breed = 2;
+	.com.ankama.dofus.server.connection.protocol.CharacterInformation.Gender gender = 3;
+	int32 level = 4;
+	string last_connection_date = 5;
+	enum Gender {
+		MALE = 0;
+		FEMALE = 1;
+	}
 
-message CharacterListResponse {
-	repeated .com.ankama.dofus.server.connection.protocol.CharacterListResponse.CharacterInformation character_information = 1;
-	message CharacterInformation {
-		string name = 1;
-		.com.ankama.dofus.server.connection.protocol.CharacterListResponse.CharacterInformation.Breed breed = 2;
-		.com.ankama.dofus.server.connection.protocol.CharacterListResponse.CharacterInformation.Gender gender = 3;
-		int32 level = 4;
-		string last_connection_date = 5;
-		int32 server_id = 6;
-		enum Gender {
-			MALE = 0;
-			FEMALE = 1;
-		}
-
-		enum Breed {
-			FECA = 0;
-			OSAMODAS = 1;
-			ENUTROF = 2;
-			SRAM = 3;
-			XELOR = 4;
-			ECAFLIP = 5;
-			ENIRIPSA = 6;
-			IOP = 7;
-			CRA = 8;
-			SADIDA = 9;
-			SACRIER = 10;
-			PANDAWA = 11;
-			ROGUE = 12;
-			MASQUERAIDER = 13;
-			FOGGERNAUTS = 14;
-			ELIOTROPE = 15;
-			HUPPERMAGE = 16;
-			OUGINAK = 17;
-			FORGELANCE = 18;
-		}
-
+	enum Breed {
+		FECA = 0;
+		OSAMODAS = 1;
+		ENUTROF = 2;
+		SRAM = 3;
+		XELOR = 4;
+		ECAFLIP = 5;
+		ENIRIPSA = 6;
+		IOP = 7;
+		CRA = 8;
+		SADIDA = 9;
+		SACRIER = 10;
+		PANDAWA = 11;
+		ROGUE = 12;
+		MASQUERAIDER = 13;
+		FOGGERNAUTS = 14;
+		ELIOTROPE = 15;
+		HUPPERMAGE = 16;
+		OUGINAK = 17;
+		FORGELANCE = 18;
 	}
 
 }
