@@ -54,12 +54,11 @@ func editZaap(from string, to string) error {
 	return nil
 }
 
-func RedirectZaap(configPort uint16) error {
-	return editZaap(CONFIG_URL, fmt.Sprintf("http://localhost:%d", configPort))
-}
-
-func UndoRedirectZaap(configPort uint16) error {
-	return editZaap(fmt.Sprintf("http://localhost:%d", configPort), CONFIG_URL)
+func RedirectZaap(configPort uint16) (func(), error) {
+	redirectUrl := fmt.Sprintf("http://localhost:%d", configPort)
+	return func() {
+		editZaap(redirectUrl, CONFIG_URL)
+	}, editZaap(CONFIG_URL, redirectUrl)
 }
 
 func Run(proxyPort uint16, configPort uint16) (string, error) {
@@ -81,11 +80,11 @@ func Run(proxyPort uint16, configPort uint16) (string, error) {
 	}
 
 	if len(config.ConnectionHosts) == 0 {
-		return "", errors.New("no connection hosts field")
+		return "", errors.New("no connection host")
 	}
-	connectionHost := config.ConnectionHosts[0]
+
 	re := regexp.MustCompile(`([a-zA-Z0-9.-]+:\d+)`)
-	originalHost := re.FindString(connectionHost)
+	originalHost := re.FindString(config.ConnectionHosts[0])
 	config.ConnectionHosts[0] = re.ReplaceAllString((config.ConnectionHosts[0]), fmt.Sprintf("localhost:%d", proxyPort))
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

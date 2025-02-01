@@ -213,6 +213,11 @@ func (p *proxy) AddConnectionModifier(gameProxy *proxy, port uint16) {
 				switch selectServer.Result.(type) {
 				case *connection.SelectServerResponse_Success_:
 					success := selectServer.GetSuccess()
+
+					if len(success.GetPorts()) == 0 {
+						return nil, errors.New("no port specified")
+					}
+
 					p.Listen(fmt.Sprintf("%s:%d", success.GetHost(), success.GetPorts()[0]), port)
 
 					success.Host = "localhost"
