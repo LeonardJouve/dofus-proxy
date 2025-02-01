@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sync"
 
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -24,7 +25,10 @@ type proxy struct {
 	serverInjector chan proto.Message
 }
 
-const CONNECTION_MODIFIER = "connection_modifier"
+const (
+	CONNECTION_MODIFIER = "connection_modifier"
+	LOG_LISTENER        = "log_listener"
+)
 
 func New(messageType proto.Message) *proxy {
 	p := &proxy{
@@ -197,7 +201,7 @@ func encodeMessage(message proto.Message) ([]byte, error) {
 	return append(varIntBuffer[:newSizeLength], data...), nil
 }
 
-func (p *proxy) AddConnectionModifier(gameProxy *proxy, port uint16) {
+func (p *proxy) AddConnectionModifier(gameProxy *proxy, port uint16) string {
 	p.AddModifier(CONNECTION_MODIFIER, func(messsage proto.Message) (proto.Message, error) {
 		connectionMessage, ok := messsage.(*connection.Message)
 		if !ok {
@@ -228,4 +232,19 @@ func (p *proxy) AddConnectionModifier(gameProxy *proxy, port uint16) {
 
 		return connectionMessage, nil
 	})
+
+	return CONNECTION_MODIFIER
+}
+
+func (p *proxy) AddLogListener() string {
+	p.AddListener(LOG_LISTENER, func(message proto.Message) {
+		json, err := protojson.MarshalOptions{Indent: "    "}.Marshal(message)
+		if err != nil {
+			return
+		}
+
+		fmt.Printf("Received:\n%s\n", string(json))
+	})
+
+	return LOG_LISTENER
 }

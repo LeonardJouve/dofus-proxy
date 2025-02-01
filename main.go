@@ -27,6 +27,8 @@ func main() {
 
 	connectionProxy := proxy.New(&connection.Message{})
 	gameProxy := proxy.New(&game.Message{})
+	connectionProxy.AddLogListener()
+	gameProxy.AddLogListener()
 	connectionProxy.AddConnectionModifier(gameProxy, GAME_PROXY_PORT)
 	connectionProxy.Listen(originalHost, CONNECTION_PROXY_PORT)
 }
