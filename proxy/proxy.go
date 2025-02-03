@@ -19,6 +19,7 @@ type Listener func(proto.Message)
 
 type proxy struct {
 	sync.Mutex
+	name           string
 	messageType    proto.Message
 	modifiers      map[string]Modifier
 	listeners      map[string]Listener
@@ -31,8 +32,9 @@ const (
 	LOG_LISTENER        = "log_listener"
 )
 
-func New(messageType proto.Message) *proxy {
+func New(name string, messageType proto.Message) *proxy {
 	p := &proxy{
+		name:           name,
 		messageType:    messageType,
 		modifiers:      make(map[string]Modifier),
 		listeners:      make(map[string]Listener),
@@ -49,16 +51,16 @@ func (p *proxy) Listen(host string, port uint16) error {
 		return err
 	}
 
-	fmt.Printf("Proxy listening on %d\n", port)
+	fmt.Printf("[%s] Proxy listening on %d\n", p.name, port)
 
 	for {
 		clientToServer, err := listener.Accept()
-		fmt.Println("New connection")
+		fmt.Printf("[%s] New connection\n", p.name)
 		if err != nil {
 			continue
 		}
 
-		fmt.Println("Client to server connected")
+		fmt.Printf("[%s] Client to server connected\n", p.name)
 
 		serverToClient, err := net.Dial("tcp", host)
 		if err != nil {
@@ -66,7 +68,7 @@ func (p *proxy) Listen(host string, port uint16) error {
 			continue
 		}
 
-		fmt.Println("Server to client connected")
+		fmt.Printf("[%s] Server to client connected\n", p.name)
 
 		go p.handle(clientToServer, serverToClient, p.clientInjector)
 		go p.handle(serverToClient, clientToServer, p.serverInjector)
@@ -128,7 +130,7 @@ func (p *proxy) handle(from net.Conn, to net.Conn, injector chan proto.Message) 
 
 			payload := fragmentBuffer[sizeLength : size+uint64(sizeLength)]
 
-			fmt.Printf("Received %d bytes: %x\n", size, payload)
+			fmt.Printf("[%s] Received %d bytes: %x\n", p.name, size, payload)
 
 			message, ok := reflect.New(reflect.TypeOf(p.messageType).Elem()).Interface().(proto.Message)
 			if !ok {
@@ -172,7 +174,7 @@ func (p *proxy) handle(from net.Conn, to net.Conn, injector chan proto.Message) 
 					return
 				}
 			} else {
-				fmt.Printf("Message reencoded different from initial: skipping modifiers (probably outdated proto files)\n")
+				fmt.Printf("[%s] Message reencoded different from initial: skipping modifiers (probably outdated proto files)\n", p.name)
 
 				_, err = to.Write(fragmentBuffer[:uint64(sizeLength)+size])
 				if err != nil {
@@ -239,7 +241,7 @@ func (p *proxy) AddConnectionModifier(gameProxy *proxy, port uint16) string {
 						return nil, errors.New("no port specified")
 					}
 
-					go p.Listen(fmt.Sprintf("%s:%d", success.GetHost(), success.GetPorts()[0]), port)
+					go gameProxy.Listen(fmt.Sprintf("%s:%d", success.GetHost(), success.GetPorts()[0]), port)
 
 					success.Host = "localhost"
 					success.Ports = []int32{int32(port)}
@@ -260,7 +262,7 @@ func (p *proxy) AddLogListener() string {
 			return
 		}
 
-		fmt.Printf("Received:\n%s\n", string(json))
+		fmt.Printf("[%s] Received:\n%s\n", p.name, string(json))
 	})
 
 	return LOG_LISTENER
