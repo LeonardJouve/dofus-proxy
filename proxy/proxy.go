@@ -16,13 +16,15 @@ import (
 
 type Modifier func(proto.Message) (proto.Message, error)
 type Listener func(proto.Message)
+type Filter func(proto.Message) bool
 
-type proxy struct {
+type Proxy struct {
 	sync.Mutex
 	name           string
 	messageType    proto.Message
 	modifiers      map[string]Modifier
 	listeners      map[string]Listener
+	filters        map[string]Filter
 	clientInjector chan proto.Message
 	serverInjector chan proto.Message
 }
@@ -32,12 +34,13 @@ const (
 	LOG_LISTENER        = "log_listener"
 )
 
-func New(name string, messageType proto.Message) *proxy {
-	p := &proxy{
+func New(name string, messageType proto.Message) *Proxy {
+	p := &Proxy{
 		name:           name,
 		messageType:    messageType,
 		modifiers:      make(map[string]Modifier),
 		listeners:      make(map[string]Listener),
+		filters:        make(map[string]Filter),
 		clientInjector: make(chan proto.Message),
 		serverInjector: make(chan proto.Message),
 	}
@@ -45,7 +48,7 @@ func New(name string, messageType proto.Message) *proxy {
 	return p
 }
 
-func (p *proxy) Listen(host string, port uint16) error {
+func (p *Proxy) Listen(host string, port uint16) error {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return err
@@ -75,39 +78,51 @@ func (p *proxy) Listen(host string, port uint16) error {
 	}
 }
 
-func (p *proxy) AddModifier(name string, modifier Modifier) {
+func (p *Proxy) AddModifier(name string, modifier Modifier) {
 	p.Lock()
 	p.modifiers[name] = modifier
 	p.Unlock()
 }
 
-func (p *proxy) RemoveModifier(name string) {
+func (p *Proxy) RemoveModifier(name string) {
 	p.Lock()
 	delete(p.modifiers, name)
 	p.Unlock()
 }
 
-func (p *proxy) AddListener(name string, listener Listener) {
+func (p *Proxy) AddListener(name string, listener Listener) {
 	p.Lock()
 	p.listeners[name] = listener
 	p.Unlock()
 }
 
-func (p *proxy) RemoveListener(name string) {
+func (p *Proxy) RemoveListener(name string) {
 	p.Lock()
 	delete(p.listeners, name)
 	p.Unlock()
 }
 
-func (p *proxy) InjectClient(message proto.Message) {
+func (p *Proxy) AddFilter(name string, filter Filter) {
+	p.Lock()
+	p.filters[name] = filter
+	p.Unlock()
+}
+
+func (p *Proxy) RemoveFilter(name string) {
+	p.Lock()
+	delete(p.filters, name)
+	p.Unlock()
+}
+
+func (p *Proxy) InjectClient(message proto.Message) {
 	p.clientInjector <- message
 }
 
-func (p *proxy) InjectServer(message proto.Message) {
+func (p *Proxy) InjectServer(message proto.Message) {
 	p.serverInjector <- message
 }
 
-func (p *proxy) handle(from net.Conn, to net.Conn, injector chan proto.Message) {
+func (p *Proxy) handle(from net.Conn, to net.Conn, injector chan proto.Message) {
 	defer from.Close()
 	defer to.Close()
 	var fragmentBuffer []byte
@@ -146,39 +161,49 @@ func (p *proxy) handle(from net.Conn, to net.Conn, injector chan proto.Message) 
 			for _, listener := range p.listeners {
 				listener(message)
 			}
+
+			isFiltered := false
+			for _, filter := range p.filters {
+				if filter(message) {
+					isFiltered = true
+					break
+				}
+			}
 			p.Unlock()
 
-			verificationBuffer, err := proto.Marshal(message)
-			if err != nil {
-				return
-			}
+			if !isFiltered {
+				verificationBuffer, err := proto.Marshal(message)
+				if err != nil {
+					return
+				}
 
-			if bytes.Equal(verificationBuffer, payload) {
-				p.Lock()
-				for _, modifier := range p.modifiers {
-					newMessage, err := modifier(message)
-					if err != nil {
-						continue
+				if bytes.Equal(verificationBuffer, payload) {
+					p.Lock()
+					for _, modifier := range p.modifiers {
+						newMessage, err := modifier(message)
+						if err != nil {
+							continue
+						}
+						message = newMessage
 					}
-					message = newMessage
-				}
-				p.Unlock()
+					p.Unlock()
 
-				data, err := encodeMessage(message)
-				if err != nil {
-					return
-				}
+					data, err := encodeMessage(message)
+					if err != nil {
+						return
+					}
 
-				_, err = to.Write(data)
-				if err != nil {
-					return
-				}
-			} else {
-				fmt.Printf("[%s] Message reencoded different from initial: skipping modifiers (probably outdated proto files)\n", p.name)
+					_, err = to.Write(data)
+					if err != nil {
+						return
+					}
+				} else {
+					fmt.Printf("[%s] Message reencoded different from initial: skipping modifiers (probably outdated proto files)\n", p.name)
 
-				_, err = to.Write(fragmentBuffer[:uint64(sizeLength)+size])
-				if err != nil {
-					return
+					_, err = to.Write(fragmentBuffer[:uint64(sizeLength)+size])
+					if err != nil {
+						return
+					}
 				}
 			}
 
@@ -220,7 +245,7 @@ func encodeMessage(message proto.Message) ([]byte, error) {
 	return append(varIntBuffer[:newSizeLength], data...), nil
 }
 
-func (p *proxy) AddConnectionModifier(gameProxy *proxy, port uint16) string {
+func (p *Proxy) AddConnectionModifier(gameProxy *Proxy, port uint16) string {
 	p.AddModifier(CONNECTION_MODIFIER, func(messsage proto.Message) (proto.Message, error) {
 		connectionMessage, ok := messsage.(*connection.Message)
 		if !ok {
@@ -255,7 +280,7 @@ func (p *proxy) AddConnectionModifier(gameProxy *proxy, port uint16) string {
 	return CONNECTION_MODIFIER
 }
 
-func (p *proxy) AddLogListener() string {
+func (p *Proxy) AddLogListener() string {
 	p.AddListener(LOG_LISTENER, func(message proto.Message) {
 		json, err := protojson.MarshalOptions{Indent: "  "}.Marshal(message)
 		if err != nil {
